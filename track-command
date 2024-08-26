@@ -1,0 +1,85 @@
+#!/usr/bin/env python
+
+import subprocess
+import os
+import argparse
+
+
+def command_tracker(command):
+    """The substance of the script. It tracks some command, such as for updating with yay or pacman."""
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=0)
+    except:
+        print("ERROR: Input must have a command!")
+        return 1
+
+    for line in iter(process.stdout.readline, ''):
+        print(line, end='')
+
+        prompt = detect_prompt(line,command=command)
+
+        if prompt:
+            notify(prompt, pid=process.pid)
+
+    process.wait()
+
+    if not check_pid(process.pid) and process.returncode != 0 and os.path.exists("/var/lib/pacman/db.lck"):
+        notify("/var/lib/pacman/db.lck exists and might need to be removed", process.pid)
+
+    return 0
+
+
+
+def notify(prompt, pid:int):
+    """Sends desktop notification using notify-send."""
+    subprocess.run(["notify-send", f" {pid}", f" PROMPT:  {prompt}",  ])
+
+def detect_prompt(line, command):
+    """
+    Detects strings to notify about. Would change depending on the 
+    package manager. Can easily be modified to have a custom command.
+    """
+    # For some reason [Y/n] commands don't show up before the notification. Please keep that in mind. They appear after 'Net Upgrade' size.
+    match command[0]:
+        case "yay" | "paru":
+            if \
+                '==> Packages to '      in line or \
+                'Diffs to show?'        in line or \
+                'Total Installed Size:' in line or \
+                'password'              in line:
+
+                    return "Action might be needed!"
+        case "sudo":
+            match command[1]:
+                case "pacman":
+                    if \
+                    '==> Packages to '      in line or \
+                    'Diffs to show?'        in line or \
+                    'Total Installed Size:' in line or \
+                    'password'              in line:
+
+                        return "Action might be needed!"
+
+    return None
+
+def check_pid(pid):
+    """Check if process with pid is dead."""
+    try:
+        os.kill(pid,0)
+    except OSError:
+        return False
+    else:
+        return True
+
+if __name__ == "__main__":
+    
+
+    parser = argparse.ArgumentParser(description=
+                                     '''
+                                        A script that tracks a command and is supposed to notify you if a prompt is needed; intended for                                        tracking updaters.
+                                     ''')
+    parser.add_argument('command', nargs=argparse.REMAINDER, help='The command for the tracker to follow. Default is using the yay package manager.')
+    args = parser.parse_args()
+
+    command_tracker(args.command)
+
